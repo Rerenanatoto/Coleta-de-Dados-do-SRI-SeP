@@ -241,26 +241,164 @@ def load_workbook(file_bytes=None) -> pd.DataFrame:
 def build_filters(df: pd.DataFrame) -> pd.DataFrame:
     st.sidebar.header("Filtros")
 
+    # -------------------------------
+    # Helpers para presets / atalhos
+    # -------------------------------
+    def _year_bounds(dfx: pd.DataFrame) -> tuple[int, int]:
+        yrs = dfx["year_num"].dropna()
+        if yrs.empty:
+            return 2019, 2028
+        return int(yrs.min()), int(yrs.max())
+
+    def _safe_sheet_name(name: str) -> str | None:
+        sheets = sorted(df["sheet"].dropna().unique().tolist())
+        return name if name in sheets else None
+
+    def apply_preset(
+        sheet_name: str,
+        country_limit: int = 10,
+        select_all_indicators: bool = True,
+        all_ratings: bool = True,
+    ):
+        """
+        Define valores no st.session_state para os widgets (keys f_*),
+        e força rerun para refletir no UI.
+        """
+        sheet_name = _safe_sheet_name(sheet_name)
+        if sheet_name is None:
+            return
+
+        dfx = df[df["sheet"] == sheet_name].copy()
+
+        # Países: pega os primeiros N (ordem alfabética para previsibilidade)
+        countries = sorted(dfx["country_name"].dropna().unique().tolist())
+        countries_sel = countries[:country_limit] if country_limit else countries
+
+        # Indicadores: todos da aba (ou vazio)
+        indicators = sorted(dfx["indicator"].dropna().unique().tolist())
+        indicators_sel = indicators if select_all_indicators else []
+
+        # Ratings: todos (ou vazio)
+        ratings = sorted(dfx["lt_fc_rating"].dropna().unique().tolist())
+        ratings_sel = ratings if all_ratings else []
+
+        y0, y1 = _year_bounds(dfx)
+
+        # Define session_state (precisa bater com as keys dos widgets)
+        st.session_state["f_sheets"] = [sheet_name]
+        st.session_state["f_countries"] = countries_sel
+        st.session_state["f_indicators"] = indicators_sel
+        st.session_state["f_ratings"] = ratings_sel
+        st.session_state["f_years"] = (y0, y1)
+        st.session_state["f_forecast"] = "Todos"
+
+        st.rerun()
+
+    def clear_filters():
+        st.session_state["f_sheets"] = []
+        st.session_state["f_countries"] = []
+        st.session_state["f_indicators"] = []
+        st.session_state["f_ratings"] = []
+        # tenta manter anos no range global
+        y0, y1 = _year_bounds(df)
+        st.session_state["f_years"] = (y0, y1)
+        st.session_state["f_forecast"] = "Todos"
+        st.rerun()
+
+    # -------------------------------
+    # Modo seletivo (abre vazio)
+    # -------------------------------
+    modo_seletivo = st.sidebar.toggle(
+        "Modo seletivo (inicia vazio)",
+        value=True,
+        help="Quando ligado, o app não plota nada até você escolher ao menos Aba + País + Indicadores."
+    )
+
+    # -------------------------------
+    # Atalhos (antes dos widgets)
+    # -------------------------------
+    with st.sidebar.expander("Atalhos rápidos", expanded=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Economic Data (top 10)", use_container_width=True):
+                apply_preset("Economic Data", country_limit=10, select_all_indicators=True, all_ratings=True)
+            if st.button("Monetary Data (top 10)", use_container_width=True):
+                apply_preset("Monetary Data", country_limit=10, select_all_indicators=True, all_ratings=True)
+
+        with c2:
+            if st.button("General Gov (top 10)", use_container_width=True):
+                apply_preset("General Government Data", country_limit=10, select_all_indicators=True, all_ratings=True)
+            if st.button("All countries (aba inteira)", use_container_width=True):
+                # cuidado: pesado por design
+                apply_preset("Economic Data", country_limit=0, select_all_indicators=True, all_ratings=True)
+
+        st.divider()
+        if st.button("🧹 Limpar filtros", use_container_width=True):
+            clear_filters()
+
+    # -------------------------------
+    # Widgets de filtro (com defaults vazios se modo seletivo)
+    # -------------------------------
     all_sheets = sorted(df["sheet"].dropna().unique().tolist())
-    selected_sheets = st.sidebar.multiselect("Aba da planilha", all_sheets, default=all_sheets)
+    selected_sheets = st.sidebar.multiselect(
+        "Aba da planilha",
+        options=all_sheets,
+        default=[] if modo_seletivo else all_sheets,
+        key="f_sheets",
+    )
+
     df1 = df[df["sheet"].isin(selected_sheets)] if selected_sheets else df.copy()
 
     all_countries = sorted(df1["country_name"].dropna().unique().tolist())
-    selected_countries = st.sidebar.multiselect("País", all_countries, default=all_countries)
+    selected_countries = st.sidebar.multiselect(
+        "País",
+        options=all_countries,
+        default=[] if modo_seletivo else all_countries,
+        key="f_countries",
+    )
 
     all_ratings = sorted(df1["lt_fc_rating"].dropna().unique().tolist())
-    selected_ratings = st.sidebar.multiselect('LT FC rating', all_ratings, default=all_ratings)
+    selected_ratings = st.sidebar.multiselect(
+        "LT FC rating",
+        options=all_ratings,
+        default=[] if modo_seletivo else all_ratings,
+        key="f_ratings",
+    )
 
     all_indicators = sorted(df1["indicator"].dropna().unique().tolist())
-    selected_indicators = st.sidebar.multiselect("Indicadores", all_indicators, default=all_indicators)
+    selected_indicators = st.sidebar.multiselect(
+        "Indicadores",
+        options=all_indicators,
+        default=[] if modo_seletivo else all_indicators,
+        key="f_indicators",
+    )
 
-    valid_years = df1["year_num"].dropna()
-    year_min, year_max = (2019, 2028) if valid_years.empty else (int(valid_years.min()), int(valid_years.max()))
-    selected_year_range = st.sidebar.slider("Faixa de anos", min_value=year_min, max_value=year_max, value=(year_min, year_max))
+    year_min, year_max = _year_bounds(df1)
+    selected_year_range = st.sidebar.slider(
+        "Faixa de anos",
+        min_value=year_min,
+        max_value=year_max,
+        value=(year_min, year_max),
+        key="f_years",
+    )
 
-    forecast_mode = st.sidebar.radio("Período", ["Todos", "Somente históricos", "Somente estimativas/projeções"], index=0)
+    forecast_mode = st.sidebar.radio(
+        "Período",
+        ["Todos", "Somente históricos", "Somente estimativas/projeções"],
+        index=0,
+        key="f_forecast",
+    )
 
+    # ✅ Regra do modo seletivo: sem seleção mínima, retorna DF vazio (não plota nada)
+    if modo_seletivo:
+        if (not selected_sheets) or (not selected_countries) or (not selected_indicators):
+            return df.iloc[0:0].copy()
+
+    # -------------------------------
+    # Aplicar filtros
+    # -------------------------------
     filtered = df.copy()
+
     if selected_sheets:
         filtered = filtered[filtered["sheet"].isin(selected_sheets)]
     if selected_countries:
@@ -270,7 +408,9 @@ def build_filters(df: pd.DataFrame) -> pd.DataFrame:
     if selected_indicators:
         filtered = filtered[filtered["indicator"].isin(selected_indicators)]
 
-    filtered = filtered[filtered["year_num"].between(selected_year_range[0], selected_year_range[1], inclusive="both")]
+    filtered = filtered[
+        filtered["year_num"].between(selected_year_range[0], selected_year_range[1], inclusive="both")
+    ]
 
     if forecast_mode == "Somente históricos":
         filtered = filtered[~filtered["is_forecast"]]
