@@ -241,209 +241,79 @@ def load_workbook(file_bytes=None) -> pd.DataFrame:
 def build_filters(df: pd.DataFrame) -> pd.DataFrame:
     st.sidebar.header("Filtros")
 
-    # ------------------------
-    # Helpers
-    # ------------------------
-    def year_bounds(dfx: pd.DataFrame) -> tuple[int, int]:
-        yrs = dfx["year_num"].dropna()
-        if yrs.empty:
-            return 2019, 2028
-        return int(yrs.min()), int(yrs.max())
-
-    def compute_universe(dfx: pd.DataFrame, sheets=None, ratings=None):
-        out = dfx.copy()
-        if sheets:
-            out = out[out["sheet"].isin(sheets)]
-        if ratings:
-            out = out[out["lt_fc_rating"].isin(ratings)]
-        return out
-
-    # ------------------------
-    # “Leve ao abrir”, mas sem travar comportamento
-    # ------------------------
-    if "initialized" not in st.session_state:
-        st.session_state["initialized"] = True
-        # defaults “vazios”, mas SEM bloquear o app
-        st.session_state.setdefault("f_sheets", [])
-        st.session_state.setdefault("f_ratings", [])
-        st.session_state.setdefault("f_countries", [])
-        st.session_state.setdefault("f_indicators", [])
-        y0, y1 = year_bounds(df)
-        st.session_state.setdefault("f_years", (y0, y1))
-        st.session_state.setdefault("f_forecast", "Todos")
-        st.session_state.setdefault("countries_autofill", True)
-        st.session_state.setdefault("indicators_autofill", True)
-        st.session_state.setdefault("auto_country_limit", 30)
-        st.session_state.setdefault("show_all_countries", False)
-        st.session_state.setdefault("countries_were_autofilled", False)
-        st.session_state.setdefault("indicators_were_autofilled", False)
-
-    # ------------------------
-    # Preferências de autofill
-    # ------------------------
-    st.sidebar.subheader("Comportamento inteligente")
-    st.session_state["countries_autofill"] = st.sidebar.toggle(
-        "Auto-preencher países ao filtrar rating/aba",
-        value=st.session_state["countries_autofill"],
-    )
-    st.session_state["indicators_autofill"] = st.sidebar.toggle(
-        "Auto-preencher indicadores ao filtrar aba",
-        value=st.session_state["indicators_autofill"],
+    # ===== Categoria (antes era "Aba da planilha") =====
+    all_categories = sorted(df["sheet"].dropna().unique().tolist())
+    selected_categories = st.sidebar.multiselect(
+        "Categoria",
+        options=all_categories,
+        default=all_categories,   # mantém o comportamento "tudo selecionado" como antes
+        key="f_categories",
+        help="Escolha uma ou mais categorias (abas da planilha)."
     )
 
-    colA, colB = st.sidebar.columns(2)
-    with colA:
-        st.session_state["show_all_countries"] = st.checkbox(
-            "Mostrar todos os países",
-            value=st.session_state["show_all_countries"],
-            help="Se desligado, o auto-preenchimento limita a quantidade para evitar travar.",
-        )
-    with colB:
-        st.session_state["auto_country_limit"] = st.number_input(
-            "Limite auto",
-            min_value=5,
-            max_value=200,
-            value=int(st.session_state["auto_country_limit"]),
-            step=5,
-        )
+    df1 = df[df["sheet"].isin(selected_categories)] if selected_categories else df.copy()
 
-    def autofill_countries():
-        if not st.session_state["countries_autofill"]:
-            return
-
-        sheets = st.session_state.get("f_sheets", [])
-        ratings = st.session_state.get("f_ratings", [])
-
-        # universo depende de aba + rating (se selecionados)
-        base = compute_universe(df, sheets=sheets or None, ratings=ratings or None)
-        countries = sorted(base["country_name"].dropna().unique().tolist())
-
-        if not countries:
-            st.session_state["f_countries"] = []
-            st.session_state["countries_were_autofilled"] = True
-            return
-
-        if st.session_state["show_all_countries"]:
-            st.session_state["f_countries"] = countries
-        else:
-            st.session_state["f_countries"] = countries[: int(st.session_state["auto_country_limit"])]
-
-        st.session_state["countries_were_autofilled"] = True
-
-    def autofill_indicators():
-        if not st.session_state["indicators_autofill"]:
-            return
-
-        sheets = st.session_state.get("f_sheets", [])
-        base = compute_universe(df, sheets=sheets or None, ratings=None)
-
-        # se o usuário selecionou 1 aba, faz todo sentido selecionar todos os indicadores dela
-        if sheets and len(sheets) == 1:
-            inds = sorted(base[base["sheet"] == sheets[0]]["indicator"].dropna().unique().tolist())
-        else:
-            inds = sorted(base["indicator"].dropna().unique().tolist())
-
-        st.session_state["f_indicators"] = inds
-        st.session_state["indicators_were_autofilled"] = True
-
-    def on_sheet_change():
-        # Quando muda aba, atualiza indicadores e também países (porque o universo mudou)
-        autofill_indicators()
-        autofill_countries()
-
-    def on_rating_change():
-        # Quando muda rating, atualiza países
-        autofill_countries()
-
-    def on_countries_manual_change():
-        # Se o usuário mexeu manualmente nos países, não “força” mais autofill automaticamente
-        st.session_state["countries_were_autofilled"] = False
-
-    def on_indicators_manual_change():
-        st.session_state["indicators_were_autofilled"] = False
-
-    # ------------------------
-    # Widgets (com callbacks)
-    # ------------------------
-    all_sheets = sorted(df["sheet"].dropna().unique().tolist())
-    st.sidebar.multiselect(
-        "Aba da planilha",
-        options=all_sheets,
-        key="f_sheets",
-        on_change=on_sheet_change,
-    )
-
-    # ratings dependem da aba (se houver)
-    df1 = df[df["sheet"].isin(st.session_state["f_sheets"])] if st.session_state["f_sheets"] else df.copy()
+    # ===== Rating =====
     all_ratings = sorted(df1["lt_fc_rating"].dropna().unique().tolist())
-    st.sidebar.multiselect(
+    selected_ratings = st.sidebar.multiselect(
         "LT FC rating",
         options=all_ratings,
+        default=[],               # vazio = todos (no recorte atual)
         key="f_ratings",
-        on_change=on_rating_change,
+        help="Deixe vazio para considerar todos os ratings."
     )
 
-    # países dependem de aba + rating
-    df2 = compute_universe(
-        df,
-        sheets=st.session_state["f_sheets"] or None,
-        ratings=st.session_state["f_ratings"] or None,
-    )
+    df2 = df1[df1["lt_fc_rating"].isin(selected_ratings)] if selected_ratings else df1.copy()
+
+    # ===== País =====
     all_countries = sorted(df2["country_name"].dropna().unique().tolist())
-    st.sidebar.multiselect(
+    selected_countries = st.sidebar.multiselect(
         "País",
         options=all_countries,
+        default=[],               # ✅ vazio = todos os países compatíveis com Categoria+Rating
         key="f_countries",
-        on_change=on_countries_manual_change,
+        help="Deixe vazio para considerar todos os países do recorte atual."
     )
 
-    # indicadores dependem da aba (e opcionalmente do rating, se você quiser)
-    df3 = df[df["sheet"].isin(st.session_state["f_sheets"])] if st.session_state["f_sheets"] else df.copy()
-    all_indicators = sorted(df3["indicator"].dropna().unique().tolist())
-    st.sidebar.multiselect(
+    # ===== Indicadores =====
+    all_indicators = sorted(df2["indicator"].dropna().unique().tolist())
+    selected_indicators = st.sidebar.multiselect(
         "Indicadores",
         options=all_indicators,
+        default=[],               # vazio = todos os indicadores do recorte atual
         key="f_indicators",
-        on_change=on_indicators_manual_change,
+        help="Deixe vazio para considerar todos os indicadores do recorte atual."
     )
 
-    # Anos / forecast
-    year_min, year_max = year_bounds(df3)
-    st.sidebar.slider(
+    # ===== Anos =====
+    valid_years = df2["year_num"].dropna()
+    year_min, year_max = (2019, 2028) if valid_years.empty else (int(valid_years.min()), int(valid_years.max()))
+    selected_year_range = st.sidebar.slider(
         "Faixa de anos",
         min_value=year_min,
         max_value=year_max,
-        key="f_years",
+        value=(year_min, year_max),
+        key="f_years"
     )
 
-    st.sidebar.radio(
+    # ===== Histórico vs Projeção =====
+    forecast_mode = st.sidebar.radio(
         "Período",
         ["Todos", "Somente históricos", "Somente estimativas/projeções"],
-        key="f_forecast",
+        index=0,
+        key="f_forecast"
     )
 
-    # ------------------------
-    # Aplicar filtros (sem exigir todos preenchidos)
-    # ------------------------
-    filtered = df.copy()
+    # ===== Aplicar filtros (somente se o usuário selecionou algo) =====
+    filtered = df2.copy()
 
-    sheets = st.session_state["f_sheets"]
-    ratings = st.session_state["f_ratings"]
-    countries = st.session_state["f_countries"]
-    indicators = st.session_state["f_indicators"]
-    y0, y1 = st.session_state["f_years"]
-    forecast_mode = st.session_state["f_forecast"]
+    if selected_countries:
+        filtered = filtered[filtered["country_name"].isin(selected_countries)]
 
-    if sheets:
-        filtered = filtered[filtered["sheet"].isin(sheets)]
-    if ratings:
-        filtered = filtered[filtered["lt_fc_rating"].isin(ratings)]
-    if countries:
-        filtered = filtered[filtered["country_name"].isin(countries)]
-    if indicators:
-        filtered = filtered[filtered["indicator"].isin(indicators)]
+    if selected_indicators:
+        filtered = filtered[filtered["indicator"].isin(selected_indicators)]
 
-    filtered = filtered[filtered["year_num"].between(y0, y1, inclusive="both")]
+    filtered = filtered[filtered["year_num"].between(selected_year_range[0], selected_year_range[1], inclusive="both")]
 
     if forecast_mode == "Somente históricos":
         filtered = filtered[~filtered["is_forecast"]]
