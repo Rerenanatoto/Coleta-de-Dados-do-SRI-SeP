@@ -282,85 +282,97 @@ def build_filters(df: pd.DataFrame) -> pd.DataFrame:
 
 def render_dashboard_tab(df: pd.DataFrame):
     st.subheader("Dashboards")
+
     if df.empty:
         st.warning("Nenhum dado encontrado com os filtros selecionados.")
         return
 
+    # KPIs
     c1, c2, c3 = st.columns(3)
     c1.metric("Países", df["country_name"].nunique())
     c2.metric("Indicadores", df["indicator"].nunique())
     c3.metric("Observações", f"{len(df):,}".replace(",", "."))
 
-    indicators = sorted(df["indicator"].dropna().unique().tolist())
-    selected_indicator = st.selectbox("Indicador para o gráfico principal", indicators, index=0)
-
-    chart_df = df[(df["indicator"] == selected_indicator)].dropna(subset=["year_num", "value"]).sort_values(["country_name", "year_num"])
-    if chart_df.empty:
-        st.info("Não há dados numéricos para o indicador selecionado.")
+    # === NOVO: escolher uma aba (sheet) para mostrar TODOS os indicadores dela ===
+    available_sheets = sorted(df["sheet"].dropna().unique().tolist())
+    if not available_sheets:
+        st.info("Nenhuma aba disponível para plotagem com os filtros atuais.")
         return
 
-    fig_line = px.line(
-        chart_df,
-        x="year_num",
-        y="value",
-        color="country_name",
-        line_dash="sheet",
-        markers=True,
-        hover_data=["lt_fc_rating", "year", "sheet"],
-        title=f"Evolução de {selected_indicator}",
-    )
-    fig_line.update_layout(legend_title_text="País")
-    st.plotly_chart(fig_line, use_container_width=True)
+    # se houver mais de 1 aba nos dados filtrados, deixa o usuário escolher qual quer plotar
+    if len(available_sheets) == 1:
+        sheet_for_charts = available_sheets[0]
+        st.caption(f"Mostrando todos os indicadores da aba: **{sheet_for_charts}**")
+    else:
+        sheet_for_charts = st.selectbox(
+            "Aba para gerar gráficos (um gráfico por indicador)",
+            available_sheets,
+            index=0,
+        )
 
-    left, right = st.columns(2)
-    latest_df = (
-        df.dropna(subset=["year_num", "value"])
-        .sort_values("year_num")
-        .groupby(["country_name", "indicator", "sheet"], as_index=False)
-        .tail(1)
-    )
+    plot_df = df[df["sheet"] == sheet_for_charts].copy()
+    plot_df = plot_df.dropna(subset=["year_num", "value"])
 
-    with left:
-        latest_ind = latest_df[latest_df["indicator"] == selected_indicator].sort_values("value", ascending=False)
-        st.markdown("#### Último valor por país")
-        if latest_ind.empty:
-            st.info("Sem dados para esse indicador.")
-        else:
-            fig_bar = px.bar(
-                latest_ind,
-                x="country_name",
-                y="value",
-                color="lt_fc_rating",
-                hover_data=["year", "sheet"],
-                title=f"Último valor disponível — {selected_indicator}",
-            )
-            fig_bar.update_xaxes(tickangle=-45)
-            st.plotly_chart(fig_bar, use_container_width=True)
+    if plot_df.empty:
+        st.info("Sem dados numéricos para gerar gráficos nesta aba com os filtros atuais.")
+        return
 
-    with right:
-        st.markdown("#### Heatmap por ano")
-        heat_df = chart_df.pivot_table(index="country_name", columns="year_num", values="value", aggfunc="mean")
-        if heat_df.empty:
-            st.info("Sem dados suficientes para montar o heatmap.")
-        else:
-            fig_heat = px.imshow(
-                heat_df,
-                aspect="auto",
-                color_continuous_scale="Blues",
-                labels={"x": "Ano", "y": "País", "color": "Valor"},
-                title=f"Heatmap — {selected_indicator}",
-            )
-            st.plotly_chart(fig_heat, use_container_width=True)
+    # Lista de indicadores desta aba
+    indicators = sorted(plot_df["indicator"].dropna().unique().tolist())
+    if not indicators:
+        st.info("Nenhum indicador encontrado para esta aba.")
+        return
 
-    st.markdown("#### Média por LT FC rating")
+    # Opcional: ordenar por nome e mostrar tudo (geralmente ~8 a ~15 por aba, ok)
+    st.markdown(f"### {sheet_for_charts} — gráficos para **{len(indicators)}** indicadores")
+
+    # Layout em grade (2 colunas). Ajuste para 3 se quiser mais compacto.
+    cols_per_row = 2
+
+    # Para evitar legendas gigantes, você pode esconder a legenda quando tiver muitos países
+    show_legend = plot_df["country_name"].nunique() <= 12
+
+    for i in range(0, len(indicators), cols_per_row):
+        row_inds = indicators[i : i + cols_per_row]
+        row_cols = st.columns(cols_per_row)
+
+        for col, ind in zip(row_cols, row_inds):
+            with col:
+                ind_df = plot_df[plot_df["indicator"] == ind].sort_values(["country_name", "year_num"])
+
+                if ind_df.empty:
+                    st.caption(f"Sem dados para: {ind}")
+                    continue
+
+                fig = px.line(
+                    ind_df,
+                    x="year_num",
+                    y="value",
+                    color="country_name",
+                    markers=True,
+                    hover_data=["lt_fc_rating", "year", "country_code"],
+                    title=ind,
+                )
+                fig.update_layout(
+                    height=340,
+                    margin=dict(l=10, r=10, t=50, b=10),
+                    legend_title_text="País",
+                    showlegend=show_legend,
+                )
+                fig.update_xaxes(title="Ano")
+                fig.update_yaxes(title="Valor")
+
+                st.plotly_chart(fig, use_container_width=True)
+
+    # Resumo por rating (mantido)
+    st.markdown("#### Média por LT FC rating (no recorte atual)")
     rating_summary = (
         df.groupby(["lt_fc_rating", "indicator"], as_index=False)["value"]
-        .mean()
-        .rename(columns={"value": "media_valor"})
-        .sort_values(["indicator", "lt_fc_rating"])
+          .mean()
+          .rename(columns={"value": "media_valor"})
+          .sort_values(["indicator", "lt_fc_rating"])
     )
     st.dataframe(rating_summary, use_container_width=True, hide_index=True)
-
 
 def render_table_tab(df: pd.DataFrame):
     st.subheader("Dados em tabela")
