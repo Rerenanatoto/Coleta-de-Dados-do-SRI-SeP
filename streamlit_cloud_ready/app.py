@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-st.set_page_config(page_title="BDA Dashboard", layout="wide")
+st.set_page_config(page_title="S&P SRI Sovereign", layout="wide")
 
 META_COLS = ["country_name", "country_code", "lt_fc_rating"]
 APP_DIR = Path(__file__).resolve().parent
