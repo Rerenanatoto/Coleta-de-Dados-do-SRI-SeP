@@ -442,8 +442,8 @@ def render_table_tab(df: pd.DataFrame):
 
 
 def main():
-    st.title("📊 BDA Dashboard")
-    st.caption("Aplicação Streamlit pronta para deploy no GitHub + Streamlit Cloud.")
+    st.title("S&P SRI Sovereign")
+    st.caption("Dados públicos do site Sovereign Risk Indicators - S&P.")
 
     local_file = find_local_xlsx()
     with st.expander("Arquivo de entrada", expanded=False):
