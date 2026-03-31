@@ -116,12 +116,9 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown(
-        "**Dependências esperadas**  
-"
-        "- APIs do BCB (SGS)  
-"
-        "- SIDRA/IBGE via `sidrapy`  
-"
+        "**Dependências esperadas**"
+        "- APIs do BCB (SGS)"
+        "- SIDRA/IBGE via `sidrapy`"
         "- Arquivo RMD opcional"
     )
 
