@@ -153,12 +153,9 @@ resultado = st.session_state.resultado
 if resultado is None:
     st.info("Defina os parâmetros na barra lateral e clique em **Gerar base**.")
     st.markdown(
-        "### O que este app faz
-"
-        "- Gera 6 tabelas compatíveis com a sua réplica de indicadores.
-"
-        "- Permite visualizar cada aba antes do download.
-"
+        "### O que este app faz"
+        "- Gera 6 tabelas compatíveis com a sua réplica de indicadores."
+        "- Permite visualizar cada aba antes do download."
         "- Exporta tudo em um único arquivo Excel formatado."
     )
 else:
